@@ -101,11 +101,4 @@
     ├── test_full.py        # 自动化测试脚本 (测试报告来源)
     └── README.md           # 项目运行说明文档
 
-## 7. 常见问题 (FAQ)
-* **Q: 启动时报错 `Access denied for user 'root'@'localhost'`**
-    * A: 这是数据库密码错误。请检查 `app.py` 里的数据库密码是否改成了您电脑上 MySQL 的正确密码。
-* **Q: 页面提示“连接服务器失败”**
-    * A: 请确认后端黑窗口（终端）是否一直开着。前端页面只是界面，必须依靠后端的 `app.py` 提供数据服务。
-* **Q: 安装依赖慢或超时**
-    * A: 可以尝试使用国内镜像源安装：
-      pip install -r requirements.txt -i [https://pypi.tuna.tsinghua.edu.cn/simple](https://pypi.tuna.tsinghua.edu.cn/simple)
+
