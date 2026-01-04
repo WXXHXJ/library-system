@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>AI 图书馆管理系统</title>
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/element-plus"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <style>
+        body { background-color: #f5f7fa; margin: 0; padding: 0; font-family: "Helvetica Neue",Helvetica,"PingFang SC", "Microsoft YaHei"; }
+        .container { max-width: 1200px; margin: 30px auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1); }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 15px; }
+        .login-box { width: 400px; margin: 80px auto; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+        .search-bar { margin-bottom: 20px; display: flex; gap: 10px; }
+        .status-tag { font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div v-if="!isLoggedIn" class="login-box">
+            <h2 style="text-align: center; color: #409EFF;">{{ isRegisterMode ? '用户注册' : '系统登录' }}</h2>
+            
+            <el-form label-width="0">
+                <el-form-item>
+                    <el-input v-model="authForm.username" placeholder="用户名" prefix-icon="el-icon-user"></el-input>
+                </el-form-item>
+                <el-form-item>
+                    <el-input v-model="authForm.password" type="password" placeholder="密码" prefix-icon="el-icon-lock"></el-input>
+                </el-form-item>
+                
+                <div v-if="!isRegisterMode">
+                    <el-button type="primary" @click="handleLogin" style="width: 100%;" :loading="loading">登 录</el-button>
+                    <div style="text-align: right; margin-top: 10px;">
+                        <el-link type="primary" @click="isRegisterMode = true">没有账号？去注册</el-link>
+                    </div>
+                </div>
+
+                <div v-else>
+                    <el-button type="success" @click="handleRegister" style="width: 100%;" :loading="loading">注 册</el-button>
+                    <div style="text-align: right; margin-top: 10px;">
+                        <el-link type="info" @click="isRegisterMode = false">已有账号？去登录</el-link>
+                    </div>
+                </div>
+            </el-form>
+        </div>
+
+        <div v-else class="container">
+            <div class="header">
+                <div>
+                    <h2 style="margin:0">🏛️ 智慧图书馆管理系统</h2>
+                    <span style="color: #666; font-size: 14px; margin-top: 5px; display:block;">
+                        当前用户: <el-tag size="small">{{ currentUser.role === 'admin' ? '管理员' : '普通用户' }}</el-tag> {{ currentUser.username }}
+                    </span>
+                </div>
+                <el-button type="danger" plain size="small" @click="logout">退出登录</el-button>
+            </div>
+
+            <el-tabs v-model="activeTab" @tab-click="handleTabClick">
+                
+                <el-tab-pane label="📚 图书大厅" name="books">
+                    <div class="search-bar">
+                        <el-input v-model="searchKeyword" placeholder="搜索书名或作者..." clearable @clear="loadBooks" style="width: 300px;"></el-input>
+                        <el-button type="primary" @click="loadBooks">查询</el-button>
+                        
+                        <el-button v-if="currentUser.role === 'admin'" type="success" @click="showAddDialog = true" style="margin-left: auto;">+ 新书入库</el-button>
+                    </div>
+
+                    <el-table :data="books" border stripe>
+                        <el-table-column prop="title" label="书名" min-width="150"></el-table-column>
+                        <el-table-column prop="author" label="作者" width="120"></el-table-column>
+                        <el-table-column prop="publisher" label="出版社" width="150"></el-table-column>
+                        <el-table-column prop="location" label="位置" width="100"></el-table-column>
+                        <el-table-column prop="isbn" label="ISBN" width="120"></el-table-column>
+                        
+                        <el-table-column label="状态" width="100" align="center">
+                            <template #default="scope">
+                                <el-tag v-if="scope.row.stock < 1 && scope.row.stock > -1" type="danger">缺货</el-tag>
+                                <el-tag v-else-if="scope.row.stock < 0" type="info">已下架</el-tag> <el-tag v-else type="success">库存 {{ scope.row.stock }}</el-tag>
+                            </template>
+                        </el-table-column>
+
+                        <el-table-column label="操作" width="180" fixed="right">
+                            <template #default="scope">
+                                <el-button type="primary" size="small" 
+                                    :disabled="scope.row.stock < 1"
+                                    @click="borrowBook(scope.row.id)">
+                                    借阅
+                                </el-button>
+
+                                <el-button v-if="currentUser.role === 'admin'" type="warning" size="small" 
+                                    @click="offlineBook(scope.row.id)">
+                                    下架
+                                </el-button>
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                </el-tab-pane>
+
+                <el-tab-pane label="📝 我的借阅" name="records">
+                    <el-table :data="myRecords" border>
+                        <el-table-column prop="bookTitle" label="借阅书名"></el-table-column>
+                        <el-table-column prop="borrowDate" label="借出时间"></el-table-column>
+                        <el-table-column prop="returnDate" label="归还时间">
+                            <template #default="scope">{{ scope.row.returnDate || '-' }}</template>
+                        </el-table-column>
+                        <el-table-column prop="status" label="状态" width="100">
+                            <template #default="scope">
+                                <el-tag :type="scope.row.status === '借阅中' ? 'warning' : 'success'">{{ scope.row.status }}</el-tag>
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="操作" width="100">
+                            <template #default="scope">
+                                <el-button v-if="scope.row.status === '借阅中'" type="success" size="small" @click="returnBook(scope.row.id)">归还</el-button>
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                </el-tab-pane>
+            </el-tabs>
+        </div>
+
+        <el-dialog v-model="showAddDialog" title="新书入库" width="500px">
+            <el-form :model="newBookForm" label-width="80px">
+                <el-form-item label="书名"><el-input v-model="newBookForm.title"></el-input></el-form-item>
+                <el-form-item label="作者"><el-input v-model="newBookForm.author"></el-input></el-form-item>
+                <el-form-item label="出版社"><el-input v-model="newBookForm.publisher" placeholder="例: 清华大学出版社"></el-input></el-form-item>
+                <el-form-item label="馆藏位置"><el-input v-model="newBookForm.location" placeholder="例: A区-3排"></el-input></el-form-item>
+                <el-form-item label="ISBN"><el-input v-model="newBookForm.isbn"></el-input></el-form-item>
+                <el-form-item label="库存"><el-input-number v-model="newBookForm.stock" :min="1"></el-input-number></el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="showAddDialog = false">取消</el-button>
+                <el-button type="primary" @click="addBook">确认入库</el-button>
+            </template>
+        </el-dialog>
+    </div>
+
+    <script>
+        const { createApp, ref, reactive } = Vue;
+        const app = createApp({
+            setup() {
+                // 状态定义
+                const isLoggedIn = ref(false);
+                const isRegisterMode = ref(false); // 控制登录/注册切换
+                const loading = ref(false);
+                const currentUser = ref({});
+                const authForm = reactive({ username: '', password: '' });
+                
+                const books = ref([]);
+                const myRecords = ref([]);
+                const activeTab = ref('books');
+                const searchKeyword = ref('');
+                
+                // 新书表单
+                const showAddDialog = ref(false);
+                const newBookForm = reactive({ title: '', author: '', isbn: '', publisher: '', location: '', stock: 5 });
+
+                const API_URL = 'http://127.0.0.1:5000/api';
+
+                // 1. 登录
+                const handleLogin = async () => {
+                    loading.value = true;
+                    try {
+                        const res = await axios.post(`${API_URL}/login`, authForm);
+                        if (res.data.code === 200) {
+                            currentUser.value = res.data.data;
+                            isLoggedIn.value = true;
+                            ElementPlus.ElMessage.success('登录成功');
+                            loadBooks();
+                        } else {
+                            ElementPlus.ElMessage.error(res.data.msg);
+                        }
+                    } catch (e) { ElementPlus.ElMessage.error('连接服务器失败'); }
+                    loading.value = false;
+                };
+
+                // 2. 注册 (新增)
+                const handleRegister = async () => {
+                    loading.value = true;
+                    try {
+                        const res = await axios.post(`${API_URL}/register`, authForm);
+                        if (res.data.code === 200) {
+                            ElementPlus.ElMessage.success('注册成功，请直接登录');
+                            isRegisterMode.value = false; // 切换回登录态
+                        } else {
+                            ElementPlus.ElMessage.error(res.data.msg);
+                        }
+                    } catch (e) { ElementPlus.ElMessage.error('注册请求失败'); }
+                    loading.value = false;
+                };
+
+                // 加载图书
+                const loadBooks = async () => {
+                    const res = await axios.get(`${API_URL}/books`, { params: { keyword: searchKeyword.value } });
+                    books.value = res.data.data;
+                };
+
+                // 加载借阅记录
+                const loadRecords = async () => {
+                    if (!currentUser.value.userId) return;
+                    const res = await axios.get(`${API_URL}/records`, { params: { userId: currentUser.value.userId } });
+                    myRecords.value = res.data.data;
+                };
+
+                // 借书
+                const borrowBook = async (bookId) => {
+                    try {
+                        const res = await axios.post(`${API_URL}/borrow`, { userId: currentUser.value.userId, bookId });
+                        if (res.data.code === 200) {
+                            ElementPlus.ElMessage.success('借阅成功');
+                            loadBooks();
+                        } else { ElementPlus.ElMessage.warning(res.data.msg); }
+                    } catch(e) { ElementPlus.ElMessage.error('请求失败'); }
+                };
+
+                // 归还
+                const returnBook = async (recordId) => {
+                    try {
+                        const res = await axios.post(`${API_URL}/return`, { recordId });
+                        if (res.data.code === 200) {
+                            ElementPlus.ElMessage.success('归还成功');
+                            loadRecords();
+                            if(activeTab.value === 'books') loadBooks();
+                        } else { ElementPlus.ElMessage.warning(res.data.msg); }
+                    } catch(e) { ElementPlus.ElMessage.error('请求失败'); }
+                };
+
+                // 管理员：入库 (新增字段)
+                const addBook = async () => {
+                    try {
+                        const res = await axios.post(`${API_URL}/books`, newBookForm);
+                        if (res.data.code === 200) {
+                            ElementPlus.ElMessage.success('入库成功');
+                            showAddDialog.value = false;
+                            loadBooks();
+                            // 重置表单
+                            Object.assign(newBookForm, { title: '', author: '', isbn: '', publisher: '', location: '', stock: 5 });
+                        } else { ElementPlus.ElMessage.warning(res.data.msg); }
+                    } catch(e) { ElementPlus.ElMessage.error('入库失败'); }
+                };
+
+                // 管理员：下架 (新增功能)
+                const offlineBook = async (bookId) => {
+                    try {
+                        await ElementPlus.ElMessageBox.confirm('确定要下架这本图书吗？下架后将无法借阅。', '提示', { type: 'warning' });
+                        const res = await axios.put(`${API_URL}/books/${bookId}`, { status: 0 }); // 调用 PUT 接口
+                        if (res.data.code === 200) {
+                            ElementPlus.ElMessage.success('图书已下架');
+                            loadBooks(); // 刷新列表，该书应消失或变灰
+                        }
+                    } catch(e) { 
+                        if(e !== 'cancel') ElementPlus.ElMessage.error('操作失败'); 
+                    }
+                };
+
+                const handleTabClick = (tab) => {
+                    if (tab.paneName === 'records') loadRecords();
+                    if (tab.paneName === 'books') loadBooks();
+                };
+
+                const logout = () => { 
+                    isLoggedIn.value = false; 
+                    Object.assign(authForm, { username: '', password: '' });
+                };
+
+                return { 
+                    isLoggedIn, isRegisterMode, loading, authForm, currentUser, 
+                    handleLogin, handleRegister, logout,
+                    books, searchKeyword, loadBooks, borrowBook, offlineBook,
+                    activeTab, myRecords, handleTabClick, returnBook,
+                    showAddDialog, newBookForm, addBook
+                };
+            }
+        });
+        app.use(ElementPlus);
+        app.mount('#app');
+    </script>
+</body>
+</html>
